@@ -1,0 +1,32 @@
+
+erDiagram
+    IDENTITY ||--o{ EMAIL_VERIFICATION_TOKEN : has
+    IDENTITY ||--o{ PASSWORD_RESET_TOKEN : has
+
+    IDENTITY {
+        uuid id PK
+        string email UK
+        string password_hash
+        string status
+        uuid customer_id
+        datetime created_at
+        datetime updated_at
+    }
+
+    EMAIL_VERIFICATION_TOKEN {
+        uuid id PK
+        uuid identity_id FK
+        string token_hash
+        datetime expires_at
+        datetime used_at
+        datetime created_at
+    }
+
+    PASSWORD_RESET_TOKEN {
+        uuid id PK
+        uuid identity_id FK
+        string token_hash
+        datetime expires_at
+        datetime used_at
+        datetime created_at
+    }
