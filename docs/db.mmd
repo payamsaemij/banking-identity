@@ -1,32 +1,42 @@
-
 erDiagram
     IDENTITY ||--o{ EMAIL_VERIFICATION_TOKEN : has
     IDENTITY ||--o{ PASSWORD_RESET_TOKEN : has
+    IDENTITY ||--o{ AUTH_SESSION : has
 
     IDENTITY {
         uuid id PK
-        string email UK
-        string password_hash
-        string status
-        uuid customer_id
-        datetime created_at
-        datetime updated_at
+        string email UK "stored normalized (trimmed + lowercased)"
+        string password_hash "Argon2id"
+        string status "pending_verification | active | deactivated (CHECK)"
+        datetime email_verified_at "nullable, timestamptz"
+        uuid customer_id UK "nullable, stable reference to Customer Service"
+        datetime created_at "timestamptz"
+        datetime updated_at "timestamptz"
     }
 
     EMAIL_VERIFICATION_TOKEN {
         uuid id PK
-        uuid identity_id FK
-        string token_hash
-        datetime expires_at
-        datetime used_at
-        datetime created_at
+        uuid identity_id FK "ON DELETE CASCADE"
+        string token_hash UK "SHA-256 of the raw token; raw value never stored"
+        datetime expires_at "timestamptz"
+        datetime used_at "nullable; single-use claim, set atomically"
+        datetime created_at "timestamptz"
     }
 
     PASSWORD_RESET_TOKEN {
         uuid id PK
-        uuid identity_id FK
-        string token_hash
-        datetime expires_at
-        datetime used_at
-        datetime created_at
+        uuid identity_id FK "ON DELETE CASCADE"
+        string token_hash UK "SHA-256 of the raw token; raw value never stored"
+        datetime expires_at "timestamptz"
+        datetime used_at "nullable; single-use claim, set atomically"
+        datetime created_at "timestamptz"
+    }
+
+    AUTH_SESSION {
+        uuid id PK
+        uuid identity_id FK "ON DELETE CASCADE"
+        string token_hash UK "SHA-256 of the opaque session token"
+        datetime created_at "timestamptz"
+        datetime expires_at "timestamptz"
+        datetime revoked_at "nullable; logout and credential changes set this"
     }
