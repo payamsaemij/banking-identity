@@ -77,7 +77,10 @@ opaque random values; only their SHA-256 hash is persisted.
 
 - Python 3.13+
 - [uv](https://docs.astral.sh/uv/)
-- PostgreSQL 14+ (any instance you can reach; Docker is fine)
+- Docker + Docker Compose
+- The [`banking-infrastructure`](../banking-infrastructure/) repo checked
+  out next to this one — it owns the shared PostgreSQL container
+  (`banking-postgres`) and the Docker network every banking service joins
 
 ## Local setup
 
@@ -92,18 +95,20 @@ in `.env.example`. Never commit real secrets.
 
 ### PostgreSQL
 
-Example with Docker:
+PostgreSQL is owned by `banking-infrastructure` — never start a second
+instance for this service:
 
 ```bash
-docker run -d --name banking-postgres \
-  -e POSTGRES_USER=banking -e POSTGRES_PASSWORD=banking -e POSTGRES_DB=banking \
-  -p 5432:5432 postgres:17
+cd ../banking-infrastructure
+cp .env.example .env          # set POSTGRES_PASSWORD once
+docker compose up -d          # starts banking-postgres (127.0.0.1:5432)
 ```
 
-Then set in `.env`:
+Then set in this repo's `.env` (same password):
 
 ```
-DATABASE_URL=postgresql+psycopg://banking:banking@localhost:5432/banking
+DATABASE_URL=postgresql+psycopg://banking:<password>@localhost:5432/banking
+POSTGRES_PASSWORD=<password>   # used by docker-compose.yml, see below
 ```
 
 ### Migrations
@@ -255,14 +260,78 @@ uv run ruff format --check src tests
 
 ## Docker
 
+The image is a multi-stage build (`uv` builder → slim runtime) that runs
+as the non-root `identity` user, ships `alembic` alongside the app, and
+keeps every secret out of the build context (`.dockerignore` excludes
+`.env`, `.git`, `.venv`, caches, tests).
+
+### Host URL vs Docker-internal URL
+
+The same PostgreSQL has two addresses, and they are **not**
+interchangeable:
+
+| Where the code runs | Host in `DATABASE_URL` | Why |
+|---|---|---|
+| Your machine (uv, tests) | `localhost:5432` | `banking-postgres` publishes `127.0.0.1:5432` on the host |
+| Inside a container | `banking-postgres:5432` | container DNS on the shared network; `localhost` inside a container is the container itself |
+
+`docker-compose.yml` therefore does not reuse the `DATABASE_URL` from
+`.env`: it rebuilds it as
+`postgresql+psycopg://banking:$POSTGRES_PASSWORD@banking-postgres:5432/banking`
+and overrides the variable per container. Keep `DATABASE_URL` in `.env`
+pointed at `localhost` for host-side tooling.
+
+### Build and run (Compose, recommended)
+
 ```bash
-docker build -t banking-identity .
-docker run --rm -p 8000:8000 --env-file .env banking-identity
+# 1. infrastructure first (once): shared postgres + network
+cd ../banking-infrastructure && docker compose up -d && cd ../banking-identity
+
+# 2. apply migrations — an explicit, one-shot step from the same image;
+#    it never runs on every startup and never races between replicas
+docker compose run --rm identity alembic upgrade head
+
+# 3. start the API (joins banking-infrastructure_default as an external
+#    network; no postgres is defined or duplicated here)
+docker compose up -d identity
+
+curl http://localhost:8000/health        # liveness
+curl http://localhost:8000/health/ready  # readiness (SELECT 1 against postgres)
+docker compose logs -f identity          # structured JSON, one object per line
+docker compose down                      # stops identity only; postgres untouched
 ```
 
-Run `alembic upgrade head` as a separate step (same image, e.g.
-`docker run ... banking-identity alembic upgrade head`) before or as
-part of deployment; the container starts the API only.
+The service publishes only `127.0.0.1:8000:8000` (loopback, like the
+infrastructure repo); remove the mapping entirely when running behind a
+reverse proxy.
+
+### Plain docker build/run
+
+```bash
+docker build -t banking-identity .
+docker run --rm -p 8000:8000 --network banking-infrastructure_default \
+  -e DATABASE_URL="postgresql+psycopg://banking:<password>@banking-postgres:5432/banking" \
+  banking-identity
+```
+
+### Diagnosing connection problems
+
+- `ready` returns 503 / logs show `health.database_unavailable` — the
+  container cannot reach PostgreSQL: check `docker network inspect
+  banking-infrastructure_default` lists `banking-identity`, that the
+  infrastructure stack is up, and that `POSTGRES_PASSWORD` in this
+  repo's `.env` matches `banking-infrastructure/.env`.
+- Startup fails fast on configuration errors (missing/empty
+  `DATABASE_URL`) — that is validation working, not a bug.
+- The image's `HEALTHCHECK` polls `/health` (liveness only); DB
+  readiness is always `GET /health/ready`.
+
+### In-container migration commands
+
+```bash
+docker compose run --rm identity alembic current       # inspect revision
+docker compose run --rm identity alembic upgrade head  # apply (idempotent)
+```
 
 ## Security considerations and known limitations
 

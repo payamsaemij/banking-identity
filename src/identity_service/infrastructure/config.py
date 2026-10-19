@@ -14,7 +14,12 @@ class Settings(BaseSettings):
     control; ``.env.example`` documents every key with placeholders.
     """
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # `.env` is shared with docker-compose.yml, which keeps deployment
+    # keys such as POSTGRES_PASSWORD beside the application settings;
+    # keys this service does not own are ignored rather than rejected.
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     # --- core -----------------------------------------------------------
     environment: Literal["local", "test", "staging", "production"] = "local"

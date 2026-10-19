@@ -1,0 +1,40 @@
+# Keep the build context (and the image) free of secrets, local state,
+# and files the build does not read.
+
+# Secrets — never send them to the builder, never bake them into layers.
+.env
+.env.*
+!.env.example
+
+# VCS and editor noise.
+.git
+.gitignore
+.vscode
+
+# Local virtualenvs and caches (the image builds its own .venv).
+.venv
+venv
+__pycache__
+**/__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Test and coverage artifacts.
+tests
+.coverage
+coverage.xml
+htmlcov
+
+# Not needed inside the image.
+docs
+technical-report.pdf
+LICENSE
+dist
+build
+*.egg-info
+
+# Docker files themselves are not part of the app payload.
+Dockerfile
+docker-compose.yml
+.dockerignore

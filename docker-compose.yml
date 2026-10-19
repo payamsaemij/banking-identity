@@ -1,0 +1,45 @@
+# Runs the Identity service against the shared PostgreSQL managed by
+# ../banking-infrastructure. The database is deliberately NOT redefined
+# here: this project joins that project's Docker network as an external
+# network and reaches PostgreSQL by its container DNS name.
+#
+# Prerequisites:
+#   1. ../banking-infrastructure is up (`docker compose up -d` there).
+#   2. POSTGRES_PASSWORD in this directory's .env matches the value in
+#      banking-infrastructure/.env. It is used only to build the
+#      Docker-internal DATABASE_URL at container start; it is never
+#      copied into the image (see .dockerignore).
+#
+# Migrations are a deliberate, separate one-shot step — they never run on
+# every startup and never race between replicas:
+#   docker compose run --rm identity alembic upgrade head
+
+services:
+  identity:
+    build: .
+    image: banking-identity:latest
+    container_name: banking-identity
+    restart: unless-stopped
+    env_file:
+      - .env                # application settings; also supplies
+                            # POSTGRES_PASSWORD for the URL below
+    environment:
+      # Docker-internal DSN: the host is the PostgreSQL container's DNS
+      # alias on the shared network (never localhost — inside a container
+      # localhost is the Identity container itself) and the port is the
+      # in-network 5432, not the host's published 127.0.0.1:5432.
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-banking}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@${POSTGRES_HOST:-banking-postgres}:5432/${POSTGRES_DB:-banking}
+    ports:
+      # Loopback-only, matching the banking-infrastructure convention;
+      # drop this mapping entirely behind a reverse proxy in production.
+      - "127.0.0.1:8000:8000"
+    networks:
+      - banking
+
+networks:
+  banking:
+    # The network docker compose created for the infrastructure project
+    # (named "<project>_default"). External: this file never creates or
+    # modifies it. Override with BANKING_NETWORK if the name ever differs.
+    name: ${BANKING_NETWORK:-banking-infrastructure_default}
+    external: true
