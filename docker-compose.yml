@@ -1,14 +1,17 @@
 # Runs the Identity service against the shared PostgreSQL managed by
 # ../banking-infrastructure. The database is deliberately NOT redefined
-# here: this project joins that project's Docker network as an external
-# network and reaches PostgreSQL by its container DNS name.
+# here: this project joins the infrastructure project's Docker network
+# as an external network and reaches PostgreSQL by its container DNS
+# name.
 #
 # Prerequisites:
-#   1. ../banking-infrastructure is up (`docker compose up -d` there).
-#   2. POSTGRES_PASSWORD in this directory's .env matches the value in
-#      banking-infrastructure/.env. It is used only to build the
-#      Docker-internal DATABASE_URL at container start; it is never
-#      copied into the image (see .dockerignore).
+#   1. ../banking-infrastructure is up (`docker compose up -d` there) —
+#      it creates the shared `banking` network this file joins.
+#   2. IDENTITY_DB_PASSWORD in this directory's .env matches the
+#      banking_identity role created by the infrastructure init script.
+#      It is used only to build the Docker-internal DATABASE_URL at
+#      container start; it is never copied into the image (see
+#      .dockerignore).
 #
 # Migrations are a deliberate, separate one-shot step — they never run on
 # every startup and never race between replicas:
@@ -22,13 +25,16 @@ services:
     restart: unless-stopped
     env_file:
       - .env                # application settings; also supplies
-                            # POSTGRES_PASSWORD for the URL below
+                            # IDENTITY_DB_PASSWORD for the URL below
     environment:
-      # Docker-internal DSN: the host is the PostgreSQL container's DNS
-      # alias on the shared network (never localhost — inside a container
-      # localhost is the Identity container itself) and the port is the
-      # in-network 5432, not the host's published 127.0.0.1:5432.
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-banking}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@${POSTGRES_HOST:-banking-postgres}:5432/${POSTGRES_DB:-banking}
+      # Docker-internal DSN, pointed at the service's OWN database: the
+      # host is the PostgreSQL container's DNS alias on the shared
+      # network (never localhost — inside a container localhost is the
+      # Identity container itself), the port is the in-network 5432, and
+      # user/database are the dedicated banking_identity role. The
+      # password has no default: the container refuses to start without
+      # it rather than silently falling back to another database.
+      DATABASE_URL: postgresql+psycopg://${IDENTITY_DB_USER:-banking_identity}:${IDENTITY_DB_PASSWORD:?Set IDENTITY_DB_PASSWORD in .env}@${IDENTITY_DB_HOST:-banking-postgres}:5432/${IDENTITY_DB_NAME:-banking_identity}
     ports:
       # Loopback-only, matching the banking-infrastructure convention;
       # drop this mapping entirely behind a reverse proxy in production.
@@ -38,8 +44,8 @@ services:
 
 networks:
   banking:
-    # The network docker compose created for the infrastructure project
-    # (named "<project>_default"). External: this file never creates or
-    # modifies it. Override with BANKING_NETWORK if the name ever differs.
-    name: ${BANKING_NETWORK:-banking-infrastructure_default}
+    # The one shared network of the local banking environment, created
+    # and owned by ../banking-infrastructure. External: this file never
+    # creates or modifies it — start the infrastructure first.
+    name: banking
     external: true

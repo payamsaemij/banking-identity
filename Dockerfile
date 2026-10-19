@@ -1,5 +1,9 @@
 # --- build stage -----------------------------------------------------------
-FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS builder
+# Python base pinned to match the runtime stage; the uv binary is copied
+# from the exact version tag that generated uv.lock, for reproducible
+# dependency installation.
+FROM python:3.13-slim-bookworm AS builder
+COPY --from=ghcr.io/astral-sh/uv:0.12.21 /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 

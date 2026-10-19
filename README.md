@@ -104,12 +104,44 @@ cp .env.example .env          # set POSTGRES_PASSWORD once
 docker compose up -d          # starts banking-postgres (127.0.0.1:5432)
 ```
 
-Then set in this repo's `.env` (same password):
+The service owns its own database and login role (`banking_identity`),
+created by the infrastructure init script. Then `cp .env.example .env`
+here and adjust if needed:
 
 ```
-DATABASE_URL=postgresql+psycopg://banking:<password>@localhost:5432/banking
-POSTGRES_PASSWORD=<password>   # used by docker-compose.yml, see below
+DATABASE_URL=postgresql+psycopg://banking_identity:banking_identity_dev@localhost:5432/banking_identity
+IDENTITY_DB_PASSWORD=banking_identity_dev   # used by docker-compose.yml, see below
 ```
+
+(The `banking_identity_dev` password is a local-development default; see
+the infrastructure repo for how to change it everywhere consistently.)
+
+#### History: migrating off the shared `banking` database
+
+Earlier revisions of this service connected to the shared `banking`
+database with the shared `banking` superuser. It now uses its dedicated
+`banking_identity` database and role. If you still have identity data in
+the old `banking` database, copy it across (a dump/restore **copy** — the
+old database is left untouched as a rollback):
+
+```bash
+cd ../banking-infrastructure
+# 1. ensure the role + database exist (idempotent, safe on existing volumes)
+docker compose exec -T postgres psql -U banking -d banking \
+  < postgres/init/01-create-service-databases.sql
+
+# 2. copy schema + data + alembic revision; ownership lands on banking_identity
+docker compose exec -T postgres pg_dump -U banking -d banking \
+  --no-owner --no-privileges > /tmp/identity-migration.sql
+docker compose exec -T postgres psql -U banking_identity -d banking_identity \
+  -v ON_ERROR_STOP=1 < /tmp/identity-migration.sql
+
+# 3. verify, then point this service's .env at banking_identity (above)
+```
+
+After the switch, keep the old `banking` database around as a rollback
+until the new setup is confirmed; drop it only when you no longer need
+the safety net.
 
 ### Migrations
 
@@ -277,22 +309,23 @@ interchangeable:
 
 `docker-compose.yml` therefore does not reuse the `DATABASE_URL` from
 `.env`: it rebuilds it as
-`postgresql+psycopg://banking:$POSTGRES_PASSWORD@banking-postgres:5432/banking`
+`postgresql+psycopg://banking_identity:$IDENTITY_DB_PASSWORD@banking-postgres:5432/banking_identity`
 and overrides the variable per container. Keep `DATABASE_URL` in `.env`
 pointed at `localhost` for host-side tooling.
 
 ### Build and run (Compose, recommended)
 
 ```bash
-# 1. infrastructure first (once): shared postgres + network
+# 1. infrastructure first (once): shared postgres + the shared `banking`
+#    network that the next step joins
 cd ../banking-infrastructure && docker compose up -d && cd ../banking-identity
 
 # 2. apply migrations — an explicit, one-shot step from the same image;
 #    it never runs on every startup and never races between replicas
 docker compose run --rm identity alembic upgrade head
 
-# 3. start the API (joins banking-infrastructure_default as an external
-#    network; no postgres is defined or duplicated here)
+# 3. start the API (joins the external `banking` network; no postgres is
+#    defined or duplicated here)
 docker compose up -d identity
 
 curl http://localhost:8000/health        # liveness
@@ -309,8 +342,8 @@ reverse proxy.
 
 ```bash
 docker build -t banking-identity .
-docker run --rm -p 8000:8000 --network banking-infrastructure_default \
-  -e DATABASE_URL="postgresql+psycopg://banking:<password>@banking-postgres:5432/banking" \
+docker run --rm -p 8000:8000 --network banking \
+  -e DATABASE_URL="postgresql+psycopg://banking_identity:<password>@banking-postgres:5432/banking_identity" \
   banking-identity
 ```
 
@@ -318,9 +351,10 @@ docker run --rm -p 8000:8000 --network banking-infrastructure_default \
 
 - `ready` returns 503 / logs show `health.database_unavailable` — the
   container cannot reach PostgreSQL: check `docker network inspect
-  banking-infrastructure_default` lists `banking-identity`, that the
-  infrastructure stack is up, and that `POSTGRES_PASSWORD` in this
-  repo's `.env` matches `banking-infrastructure/.env`.
+  banking` lists `banking-identity`, that the infrastructure stack is
+  up, and that `IDENTITY_DB_PASSWORD` in this repo's `.env` matches the
+  `banking_identity` role password created by the infrastructure init
+  script.
 - Startup fails fast on configuration errors (missing/empty
   `DATABASE_URL`) — that is validation working, not a bug.
 - The image's `HEALTHCHECK` polls `/health` (liveness only); DB

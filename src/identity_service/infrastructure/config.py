@@ -1,8 +1,9 @@
+import json
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -69,7 +70,28 @@ class Settings(BaseSettings):
     password_reset_request_rate_limit_window_seconds: int = Field(default=600, gt=0)
 
     # --- HTTP ---------------------------------------------------------------
-    cors_origins: list[str] = Field(default_factory=list)
+    # NoDecode: pydantic-settings would otherwise demand JSON here, which
+    # contradicts the documented comma-separated format (and would reject
+    # the empty placeholder in .env.example outright).
+    cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _decode_cors_origins(cls, value: object) -> object:
+        """Accept '', a JSON array, or a bare comma-separated string.
+
+        An empty value means "no CORS middleware at all" (the default).
+        """
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if not stripped:
+            return []
+        try:
+            decoded = json.loads(stripped)
+        except json.JSONDecodeError:
+            return [origin.strip() for origin in stripped.split(",") if origin.strip()]
+        return decoded
 
 
 @lru_cache
