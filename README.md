@@ -190,6 +190,7 @@ envelope everywhere:
 | POST | `/password/reset` | — | 204 | body `{token, new_password}` |
 | POST | `/deactivate` | session | 204 | needs `current_password`; revokes everything |
 | POST | `/reactivate` | admin key | 200 | header `X-Admin-Key`; 403 when unset/wrong |
+| POST | `/introspect` | service key | 200 | header `X-Service-Key`; validates a session token for other services |
 | GET | `/health` | — | 200 | liveness (no DB) |
 | GET | `/health/ready` | — | 200/503 | readiness (executes `SELECT 1`) |
 
@@ -208,6 +209,30 @@ JWTs were deliberately not chosen: stateless tokens cannot be
 individually revoked without a denylist, and immediate revocation is a
 hard requirement for the credential-changing flows above. The tradeoff
 is one indexed database lookup per authenticated request.
+
+### Token introspection (service-to-service)
+
+Other services validate bearer tokens through
+`POST /api/v1/identity/introspect` instead of touching this service's
+database (banking-accounts ships such a client). The caller
+authenticates with the shared secret configured as `SERVICE_API_KEY`
+here and `IDENTITY_SERVICE_API_KEY` there, sent as the `X-Service-Key`
+header; when no key is configured here the endpoint is disabled
+outright (403 for every caller). The token travels in the JSON body —
+never in the URL, where it would land in access logs — and the
+response carries no email or status, only:
+
+```json
+{"active": true, "identity_id": "…", "expires_at": "…"}
+{"active": false}
+```
+
+Unknown, expired, revoked, and deactivated sessions return the same
+inactive body, so the endpoint never leaks why a token failed.
+`identity_id` is the caller's authoritative owner reference (Accounts
+stores it as `owner_identity_id`). Because every introspection resolves
+the session from the database, revocation takes effect on the caller's
+very next request.
 
 ### Token lifecycle
 
@@ -394,4 +419,3 @@ docker compose run --rm identity alembic upgrade head  # apply (idempotent)
    `customer_id` at registration) so profiles link to identities.
 2. Transactional outbox for reliable email delivery.
 3. Redis-backed rate limiter + per-account (not just per-IP) limits.
-4. Session introspection endpoint for other services (gateway auth).

@@ -108,6 +108,25 @@ class ReactivateRequest(BaseModel):
     identity_id: UUID
 
 
+class IntrospectRequest(BaseModel):
+    """Token introspection request from a trusted calling service."""
+
+    token: str = Field(min_length=1, max_length=256)
+
+
+class IntrospectionResponse(BaseModel):
+    """Minimal introspection result; never includes email or status.
+
+    ``active`` is false for unknown, expired, revoked, and deactivated
+    sessions alike — deliberately indistinguishable. The optional fields
+    are present only when ``active`` is true.
+    """
+
+    active: bool
+    identity_id: UUID | None = None
+    expires_at: datetime | None = None
+
+
 class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

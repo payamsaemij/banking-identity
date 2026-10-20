@@ -8,11 +8,14 @@ from identity_service.presentation.dependencies import (
     ResendRateLimited,
     UseCasesDep,
     require_admin,
+    require_service,
 )
 from identity_service.presentation.schemas import (
     ChangePasswordRequest,
     DeactivateRequest,
     IdentityResponse,
+    IntrospectionResponse,
+    IntrospectRequest,
     LoginRequest,
     LoginResponse,
     MessageResponse,
@@ -189,3 +192,31 @@ def reactivate(
 ) -> IdentityResponse:
     identity = use_cases.reactivate_identity.execute(payload.identity_id)
     return IdentityResponse.from_identity(identity)
+
+
+@router.post(
+    "/introspect",
+    response_model=IntrospectionResponse,
+    response_model_exclude_none=True,
+    summary="Validate a session token (service-to-service)",
+    description=(
+        "Lets trusted services (e.g. Accounts) resolve a bearer token "
+        "into its identity. Guarded by the X-Service-Key header; "
+        "disabled (403 for every caller) when no service key is "
+        "configured. Unknown, expired, revoked, and deactivated "
+        "sessions all return the same inactive body."
+    ),
+    dependencies=[Depends(require_service)],
+)
+def introspect(
+    payload: IntrospectRequest,
+    use_cases: UseCasesDep,
+) -> IntrospectionResponse:
+    context = use_cases.authenticate_session.execute(payload.token)
+    if context is None:
+        return IntrospectionResponse(active=False)
+    return IntrospectionResponse(
+        active=True,
+        identity_id=context.identity_id,
+        expires_at=context.expires_at,
+    )

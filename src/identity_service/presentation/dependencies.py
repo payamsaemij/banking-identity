@@ -238,6 +238,27 @@ async def require_admin(
         raise HTTPException(status_code=403, detail="Administrative access required.")
 
 
+async def require_service(
+    settings: Annotated[Settings, Depends(get_settings)],
+    x_service_key: Annotated[str | None, Header(alias="X-Service-Key")] = None,
+) -> None:
+    """Authorize a trusted calling service for token introspection.
+
+    Same policy as ``require_admin``: a shared per-environment secret,
+    compared in constant time, and when no key is configured the
+    endpoint is disabled outright rather than accepting keyless calls.
+    """
+    configured = settings.service_api_key
+    if (
+        not configured
+        or x_service_key is None
+        or not secrets.compare_digest(
+            x_service_key.encode("utf-8"), configured.encode("utf-8")
+        )
+    ):
+        raise HTTPException(status_code=403, detail="Service access required.")
+
+
 async def register_rate_limit(request: Request, settings: SettingsDep) -> None:
     await _enforce_rate_limit(
         request,

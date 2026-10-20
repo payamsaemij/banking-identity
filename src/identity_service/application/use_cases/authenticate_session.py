@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from identity_service.application.ports.clock import Clock
@@ -15,10 +16,16 @@ class AuthContext:
     session_id: UUID
     identity_id: UUID
     email: str
+    expires_at: datetime
 
     @classmethod
     def of(cls, session: AuthSession, email: str) -> "AuthContext":
-        return cls(session_id=session.id, identity_id=session.identity_id, email=email)
+        return cls(
+            session_id=session.id,
+            identity_id=session.identity_id,
+            email=email,
+            expires_at=session.expires_at,
+        )
 
 
 class AuthenticateSession:

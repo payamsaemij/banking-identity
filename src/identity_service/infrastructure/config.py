@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     # Guards the reactivation endpoint (service-to-service). When unset,
     # reactivation is disabled outright (every request is rejected).
     admin_api_key: str | None = None
+    # Shared secret guarding the introspection endpoint, which other
+    # services (e.g. Accounts) present as X-Service-Key to validate
+    # bearer tokens. When unset, introspection is disabled outright
+    # (every caller gets 403) rather than accepting keyless calls.
+    service_api_key: str | None = None
 
     # --- rate limits (per instance, per client IP) -------------------------
     register_rate_limit_max: int = Field(default=5, gt=0)
